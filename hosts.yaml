@@ -1,0 +1,8 @@
+myhosts:
+  hosts:
+    ec2:
+      ansible_host: '{{ HOST_IP }}'
+      ansible_ssh_private_key_file: '{{ KEY_FILE_PATH }}'
+  vars:
+    ansible_python_interpreter: /usr/bin/python3.9
+    ansible_user: ec2-user

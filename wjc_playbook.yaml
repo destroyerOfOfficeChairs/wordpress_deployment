@@ -1,0 +1,111 @@
+- name: Install and configure WordPress
+  hosts: myhosts
+  become: yes
+  vars_files:
+    - external_vars.yaml
+
+  tasks:
+
+    - name: Update all packages
+      yum:
+        name: '*'
+        state: latest
+
+    - name: Install yum packages
+      yum:
+        name:
+          - mariadb105-server
+          - nginx
+          - php8.3
+          - php8.3-cli
+          - php8.3-devel
+          - php8.3-fpm
+          - php8.3-gd
+          - php8.3-mysqlnd
+          - python3-pip
+          - python3-certbot-nginx
+
+    - name: Install Python packages
+      pip:
+        name:
+          - boto3
+          - botocore
+          - packaging
+          - pymysql
+
+    - name: Start and enable Nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Start and enable mariadb
+      systemd:
+        name: mariadb
+        state: started
+        enabled: yes
+
+    - name: Download WordPress
+      command: wget https://wordpress.org/latest.tar.gz -P /tmp
+      args:
+        creates: /tmp/latest.tar.gz
+
+    - name: Extract WordPress
+      command: tar -xvzf /tmp/latest.tar.gz -C /var/www/html
+      args:
+        creates: /var/www/html/wordpress
+
+    - name: Get current ownership of WordPress directory
+      stat:
+        path: /var/www/html/wordpress
+      register: wp_stat
+
+    - name: Ensure correct ownership of WordPress files
+      file:
+        path: /var/www/html/wordpress
+        state: directory
+        owner: nginx
+        group: nginx
+        recurse: yes
+      when: wp_stat.stat.pw_name != 'nginx' or wp_stat.stat.gr_name != 'nginx'
+
+    - name: Ensure correct permission of WordPress files
+      file:
+        path: /var/www/html/wordpress
+        state: directory
+        mode: '0755'
+        recurse: yes
+      when: wp_stat.stat.mode != '0755'
+
+    - name: Render wp-config.php from template
+      template:
+        src: wp-config.j2
+        dest: /var/www/html/wordpress/wp-config.php
+
+    - name: Set root password for MariaDB
+      mysql_user:
+        name: root
+        host: localhost
+        login_unix_socket: /var/lib/mysql/mysql.sock
+        column_case_sensitive: true
+        password: "{{ WPDB_ROOT_PASSWORD }}"
+        check_implicit_admin: yes
+        state: present
+        config_file: ""
+        login_password: "{{ WPDB_ROOT_PASSWORD }}"
+    
+    - name: Create WordPress database
+      community.mysql.mysql_db:
+        name: "{{ WPDB_NAME }}"
+        login_user: root
+        login_password: "{{ WPDB_ROOT_PASSWORD }}"
+
+    - name: Create WordPress database user
+      community.mysql.mysql_user:
+        name: "{{ WPDB_USER_NAME }}"
+        password: "{{ WPDB_USER_PASSWORD }}"
+        priv: "{{ WPDB_NAME }}.*:ALL"
+        column_case_sensitive: true
+        host: "{{ WPDB_HOST }}"
+        login_user: root
+        login_password: "{{ WPDB_ROOT_PASSWORD }}"

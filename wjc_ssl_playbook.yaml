@@ -1,0 +1,64 @@
+- name: Install and configure WordPress
+  hosts: myhosts
+  become: yes
+  vars_files:
+    - external_vars.yaml
+
+  tasks:
+    - name: Check if SSL certificate exists
+      stat:
+        path: /etc/letsencrypt/live/{{ MY_DOMAIN }}/fullchain.pem
+      register: cert_check
+
+    - name: Obtain or renew SSL certificate using Certbot
+      command: >
+        certbot certonly --nginx
+        --non-interactive
+        --agree-tos
+        --email {{ MY_EMAIL }}
+        --domain {{ MY_DOMAIN }}
+      when: not cert_check.stat.exists
+      register: certbot_output
+
+    - name: Create certbot-renew.service
+      copy:
+        dest: /etc/systemd/system/certbot-renew.service
+        content: |
+          [Unit]
+          Description=Certbot Renewal
+
+          [Service]
+          ExecStart=/usr/bin/certbot renew --quiet --post-hook "systemctl reload nginx"
+
+    - name: Create certbot-renew.timer
+      copy:
+        dest: /etc/systemd/system/certbot-renew.timer
+        content: |
+          [Unit]
+          Description=Run certbot-renew.service twice daily
+
+          [Timer]
+          OnCalendar=*-*-* 00,12:00:00
+          Persistent=true
+          RandomizedDelaySec=600
+
+          [Install]
+          WantedBy=timers.target
+
+    - name: Enable and start certbot-renew.timer
+      systemd:
+        name: certbot-renew.timer
+        enabled: yes
+        state: started
+
+    - name: Render wordpress.conf from template
+      template:
+        src: nginx_conf.j2
+        dest: /etc/nginx/conf.d/wordpress.conf
+      register: changed_nginx_config
+
+    - name: Restart Nginx
+      systemd:
+        name: nginx
+        state: restarted
+      when: changed_nginx_config.changed
